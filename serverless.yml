@@ -1,0 +1,48 @@
+service: xls-file-handling
+org: evrouin
+app: aws-python-project
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.9
+  stage: ${opt:stage, 'dev'}
+
+  environment:
+    STAGE: ${self:custom.stage}
+    XLS_FILE_QUEUE: ${self:custom.stage}-xls-file-queue
+    XLS_FILE_DEAD_LETTER_QUEUE: ${self:custom.stage}-xls-file-dead-letter-queue
+
+  custom:
+    stage: ${self:provider.stage}
+
+functions:
+  FileUploadHandler:
+    handler: app.handlers.file_upload_handler.handler
+    reservedConcurrency: 50
+    timeout: 900
+    memorySize: 2048
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [XLSFileQueue, Arn]
+      - schedule: rate(1 minute)
+    tracing: Active
+
+resources:
+  Resources:
+    XLSFileQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:provider.environment.XLS_FILE_QUEUE}
+        VisibilityTimeout: 900
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [XLSFileDeadLetterQueue, Arn]
+          maxReceiveCount: 5
+
+    XLSFileDeadLetterQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        VisibilityTimeout: 900
+        QueueName: ${self:provider.environment.XLS_FILE_DEAD_LETTER_QUEUE}
