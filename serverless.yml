@@ -5,28 +5,27 @@ frameworkVersion: '3'
 
 provider:
   name: aws
+  region: ap-southeast-1
   runtime: python3.9
   stage: ${opt:stage, 'dev'}
 
   environment:
     STAGE: ${self:custom.stage}
-    XLS_FILE_QUEUE: ${self:custom.stage}-xls-file-queue
-    XLS_FILE_DEAD_LETTER_QUEUE: ${self:custom.stage}-xls-file-dead-letter-queue
+    SQS_XLS_FILE_QUEUE: ${self:provider.stage}-xls-file-queue
+    SQS_XLS_FILE_DEAD_LETTER_QUEUE: ${self:provider.stage}-xls-file-dead-letter-queue
 
-  custom:
-    stage: ${self:provider.stage}
+custom:
+  stage: ${self:provider.stage}
 
 functions:
   FileUploadHandler:
     handler: app.handlers.file_upload_handler.handler
-    reservedConcurrency: 50
     timeout: 900
     memorySize: 2048
     events:
       - sqs:
           arn:
             Fn::GetAtt: [XLSFileQueue, Arn]
-      - schedule: rate(1 minute)
     tracing: Active
 
 resources:
@@ -34,7 +33,7 @@ resources:
     XLSFileQueue:
       Type: AWS::SQS::Queue
       Properties:
-        QueueName: ${self:provider.environment.XLS_FILE_QUEUE}
+        QueueName: ${self:provider.environment.SQS_XLS_FILE_QUEUE}
         VisibilityTimeout: 900
         RedrivePolicy:
           deadLetterTargetArn:
@@ -45,4 +44,25 @@ resources:
       Type: AWS::SQS::Queue
       Properties:
         VisibilityTimeout: 900
-        QueueName: ${self:provider.environment.XLS_FILE_DEAD_LETTER_QUEUE}
+        QueueName: ${self:provider.environment.SQS_XLS_FILE_DEAD_LETTER_QUEUE}
+        
+    XLSFileBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: xls-file-input-folder
+
+    S3EventQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      DependsOn: XLSFileQueue
+      Properties:
+        PolicyDocument:
+          Id: SQSPolicy
+          Statement:
+            - Effect: Allow
+              Sid: PutS3Events
+              Action: SQS:SendMessage
+              Resource: !GetAtt XLSFileQueue.Arn
+              Principal:
+                Service: s3.amazonaws.com
+        Queues:
+          - !Ref XLSFileQueue
